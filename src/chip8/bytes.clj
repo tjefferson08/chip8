@@ -47,9 +47,15 @@
 (defn half-diff [op1 op2]
   (- (bit-and 0x0F op1) (bit-and 0x0F op2)))
 
+(defn bcd [data]
+  (let [hundreds (quot data 100)
+        rm       (mod data 100)
+        tens     (quot rm 10)
+        ones     (mod rm 10)]
+   [hundreds tens ones]))
 
 (defn slice
-  "Take a slice (copy) array of byte array `bytes`"
+  ""
   [bytes from to]
   (java.util.Arrays/copyOfRange bytes from to))
 

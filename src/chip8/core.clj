@@ -2,8 +2,8 @@
   (:require [chip8.bytes :as bytes]
             [clojure.core.match :refer [match]]))
 
-(def sprites [0xF0, 0x90, 0x90, 0x90, 0xF0,
-              0x20, 0x60, 0x20, 0x20, 0x70,
+(def sprites [0xF0, 0x90, 0x90, 0x90, 0xF0, ;; 0
+              0x20, 0x60, 0x20, 0x20, 0x70, ;; 1
               0xF0, 0x10, 0xF0, 0x80, 0xF0,
               0xF0, 0x10, 0xF0, 0x10, 0xF0,
               0x90, 0x90, 0xF0, 0x10, 0x10,
@@ -19,6 +19,9 @@
               0xF0, 0x80, 0xF0, 0x80, 0xF0,
               0xF0, 0x80, 0xF0, 0x80, 0x80])
 
+(defn sprite-address [digit]
+  (* digit 0x5))
+
 (defn init-ram [ram]
   (let [reserved (apply vector-of :byte (map unchecked-byte (take 0x0200 (concat sprites (repeat 0x00)))))
         program  (if (string? ram)
@@ -28,6 +31,12 @@
     (vec (take 0x0FFF (concat reserved program empty)))))
 
 (defn to-vx [x] (keyword (.toLowerCase (format "v%1x" x))))
+
+(defn registers []
+  (->> (range 0x0 0x10)
+       (map #(format "v%1X" %))
+       (map #(.toLowerCase %))
+       (map keyword)))
 
 (defn init
   ([] (init (vector-of :byte 0x00)))
@@ -93,6 +102,10 @@
       [_ 0xF _ 0x0 0xA]  {:type :load, :mode :register_key, :reg1 (to-vx n2), :reg2 (throw (Exception. "Unimplemented: keys"))} ;; TODO LD Vx, KEY
       [_ 0xF _ 0x1 0x5]  {:type :load, :mode :register_register, :reg1 :dt, :reg2 (to-vx n2)}
       [_ 0xF _ 0x1 0x8]  {:type :load, :mode :register_register, :reg1 :st, :reg2 (to-vx n2)} ;; LD ST, Vx
+      [_ 0xF _ 0x2 0x9]  {:type :load, :mode :register_digit, :reg1 :i, :reg2 (to-vx n2)}     ;; LD F, Vx (digit address load)
+      [_ 0xF _ 0x3 0x3]  {:type :load, :mode :memloc_bcd, :reg1 :i, :reg2 (to-vx n2)}     ;; LD B, Vx (BCD load)
+      [_ 0xF _ 0x5 0x5]  {:type :load, :mode :memloc_bulk, :reg1 :i, :data n2}      ;; LD [I], Vx (dump bulk registers)
+      [_ 0xF _ 0x6 0x5]  {:type :load, :mode :bulk_memloc, :reg2 :i, :data n2}            ;; LD Vx, [I] (load bulk registers)
       :else (throw (Exception. (format "Unhandled opcode %04X" op))))))
 
 (defn fetch-instruction [ctx]
@@ -106,13 +119,30 @@
                :cur-instr (instruction-for-opcode op))
         (write-reg :pc (+ 2 pc)))))
 
+(defn- dump-registers [ctx]
+  (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)
+        regs (take (inc data) (registers))
+        pairs (map vector regs (iterate inc (read-reg ctx reg1)))]
+    (reduce
+     (fn [ctx' [r addr]]
+       (write-ram ctx' addr (read-reg ctx' r)))
+     ctx
+     pairs)))
+
 (defn execute [ctx]
   (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)]
     (match [type mode]
       [:load :register_d8]  (write-reg ctx reg1 data)
       [:load :register_d12] (write-reg ctx reg1 data)
       [:load :register_register] (write-reg ctx reg1 (read-reg ctx reg2))
-      [:exit _]            (assoc ctx :stopped true)
+      [:load :register_digit] (write-reg ctx reg1 (sprite-address (read-reg ctx reg2)))
+      [:load :memloc_bcd]     (let [[h t o] (bytes/bcd (read-reg ctx reg2))
+                                    addr    (read-reg ctx :i)]
+                                (-> ctx (write-ram addr h)
+                                        (write-ram (+ 1 addr) t)
+                                        (write-ram (+ 2 addr) o)))
+      [:load, :memloc_bulk] (dump-registers ctx)
+      [:exit _]             (assoc ctx :stopped true)
       :else (throw (Exception. (format "Unhandled instruction %s" type))))))
 
 
@@ -173,6 +203,10 @@
   (apply vector-of :byte (map unchecked-byte (take 0x01FF (concat sprites (repeat 0x00)))))
   (apply vector-of :byte (map unchecked-byte (take 0x01FF (concat sprites (repeat 0x00)))))
   (into (vector-of :byte) (map unchecked-byte [0xFF]))
+  (quot 0xAD 10)
+  (rem 0xAD 100)
+
+  (count (map #(str %1 " - " %2) (registers) (take 100 (iterate inc 0xF1))))
 
 
   ,)
