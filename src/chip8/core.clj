@@ -21,12 +21,9 @@
 
 (defn init-ram [ram]
   (let [reserved (apply vector-of :byte (map unchecked-byte (take 0x0200 (concat sprites (repeat 0x00)))))
-        _ (println "length of reserved" (count reserved))
         program  (if (string? ram)
                    (bytes/slurp-bytes ram)
                    (into (vector-of :byte) (map unchecked-byte ram)))
-        val (concat reserved program)
-        _ (println "length of reserved + program" (count val))
         empty    (repeat 0x00)]
     (vec (take 0x0FFF (concat reserved program empty)))))
 
@@ -81,13 +78,21 @@
     (assoc-in ctx [:registers r] v)))
 
 (defn instruction-for-opcode [op]
-  (let [n3 (bit-and 0x0F (bit-shift-right op 12))
-        n2 (bit-and 0x0F (bit-shift-right op 8))
-        lo (bit-and 0xFF op)]
-    (cond
-      (= 0x00FD op)  {:type :exit}
-      (<= 0x6000 op) {:type :load, :mode :register_d8, :reg1 (to-vx n2), :data lo}
-
+  (let [n3  (bit-and 0x0F (bit-shift-right op 12))
+        n2  (bit-and 0x0F (bit-shift-right op 8))
+        n1  (bit-and 0x0F (bit-shift-right op 4))
+        n0  (bit-and 0x0F op)
+        opx (format "%02X" op)
+        nnn (bit-and 0x0FFF op)
+        lo  (bit-and 0xFF op)]
+    (match [op n3 n2 n1 n0]
+      [0x00FD _ _ _ _] {:type :exit}
+      [_ 0xA _ _ _]  {:type :load, :mode :register_d12, :reg1 :i, :data nnn}        ;; Annn - LD I, addr
+      [_ 0x6 _ _ _]  {:type :load, :mode :register_d8, :reg1 (to-vx n2), :data lo}
+      [_ 0xF _ 0x0 0x7]  {:type :load, :mode :register_register, :reg1 (to-vx n2), :reg2 :dt}
+      [_ 0xF _ 0x0 0xA]  {:type :load, :mode :register_key, :reg1 (to-vx n2), :reg2 (throw (Exception. "Unimplemented: keys"))} ;; TODO LD Vx, KEY
+      [_ 0xF _ 0x1 0x5]  {:type :load, :mode :register_register, :reg1 :dt, :reg2 (to-vx n2)}
+      [_ 0xF _ 0x1 0x8]  {:type :load, :mode :register_register, :reg1 :st, :reg2 (to-vx n2)} ;; LD ST, Vx
       :else (throw (Exception. (format "Unhandled opcode %04X" op))))))
 
 (defn fetch-instruction [ctx]
@@ -104,7 +109,9 @@
 (defn execute [ctx]
   (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)]
     (match [type mode]
-      [:load :register_d8] (write-reg ctx reg1 data)
+      [:load :register_d8]  (write-reg ctx reg1 data)
+      [:load :register_d12] (write-reg ctx reg1 data)
+      [:load :register_register] (write-reg ctx reg1 (read-reg ctx reg2))
       [:exit _]            (assoc ctx :stopped true)
       :else (throw (Exception. (format "Unhandled instruction %s" type))))))
 

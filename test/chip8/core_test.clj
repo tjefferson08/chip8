@@ -14,15 +14,21 @@
     (is (= 0x00 (sut/read-reg ctx :v0)))
     (is (= 0xA6 (sut/read-reg ctx' :v0)))))
 
-(deftest load
+(deftest load-simple
   (let [ctx (sut/init [0x60 0xAF
                        0x61 0x11
                        0x6F 0x1F
+                       0xF1 0x15   ;; LD DT, V1
+                       0xF2 0x07   ;; LD V2, DT
+                       0xAB 0xCD
                        0x00 0xFD])  ;; EXIT
         ctx' (sut/run ctx)]
     (is (= 0xAF (sut/read-reg ctx' :v0)))
     (is (= 0x11 (sut/read-reg ctx' :v1)))
-    (is (= 0x1F (sut/read-reg ctx' :vf)))))
+    (is (= 0x1F (sut/read-reg ctx' :vf)))
+    (is (= 0x0BCD (sut/read-reg ctx' :i)))
+    (is (= 0x11 (sut/read-reg ctx' :dt)))
+    (is (= 0x11 (sut/read-reg ctx' :v2)))))
 
 (comment
   (format "%02X" (bit-xor 0xAA 0xAA))
