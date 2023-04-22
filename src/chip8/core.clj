@@ -61,6 +61,8 @@
                 :i 0x0000
                 :pc 0x0200}
      :cur-instr nil,
+     :cycle-limit ##Inf,
+     :cycle-num 0,
      :waiting false,
      :ram (init-ram ram)
      :stack (apply vector-of :short (repeat 16 0x0000))
@@ -242,22 +244,29 @@
   (let [ctx' (if (:waiting ctx)
                (step-halted ctx)
                (step-running ctx))]
-    ctx'))
+    (update ctx' :cycle-num inc)))
 
 (defn run [ctx]
   (loop [ctx' ctx]
-    (if (:stopped ctx')
+    (println "cycles" (:cycle-num ctx') (:cycle-limit ctx'))
+    (if (or (> (:cycle-num ctx') (:cycle-limit ctx')) (:stopped ctx'))
       ctx'
       (recur (step ctx')))))
 
 (def cli-options
   [["-r" "--rom ROM" "ROM path"]
+   ["-c" "--cycle-limit CYCLES" "exit after excuting CYCLES instructions"
+    :default nil
+    :parse-fn #(Integer/parseInt %)]
    ["-h" "--help"]])
 
 (defn -main [& args]
   (let [opts (parse-opts args cli-options)
-        ctx  (init (get-in opts [:options :rom]))]
-    (run ctx)))
+        {:keys [rom cycle-limit]} (:options opts)
+        _ (println opts)
+        ctx   (init rom)
+        ctx'  (assoc ctx :cycle-limit (or cycle-limit ##Inf))]
+    (run ctx')))
 
 
 (comment
