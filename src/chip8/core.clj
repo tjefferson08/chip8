@@ -118,6 +118,7 @@
       [_ 0x1 _ _ _]  {:type :jump, :mode :d12, :data nnn}        ;; Annn - LD I, addr
       [_ 0xA _ _ _]  {:type :load, :mode :register_d12, :reg1 :i, :data nnn}        ;; Annn - LD I, addr
       [_ 0x6 _ _ _]  {:type :load, :mode :register_d8, :reg1 (to-vx n2), :data lo}
+      [_ 0x7 _ _ _]  {:type :add, :mode :register_d8, :reg1 (to-vx n2) :data lo};; 7xkk - ADD Vx, byte
       [_ 0xD _ _ _]  {:type :draw, :reg1 (to-vx n2), :reg2 (to-vx n1), :data n0}
       [_ 0xF _ 0x0 0x7]  {:type :load, :mode :register_register, :reg1 (to-vx n2), :reg2 :dt}
       [_ 0xF _ 0x0 0xA]  {:type :load, :mode :register_key, :reg1 (to-vx n2), :reg2 (throw (Exception. "Unimplemented: keys"))} ;; TODO LD Vx, KEY
@@ -203,6 +204,7 @@
                                         (write-ram (+ 2 addr) o)))
       [:load, :memloc_bulk] (dump-registers ctx)
       [:load, :bulk_memloc] (load-registers ctx)
+      [:add, :register_d8]  (write-reg ctx reg1 (+ data (read-reg ctx reg1)))
       [:exit _]             (assoc ctx :stopped true)
       :else (throw (Exception. (format "Unhandled instruction %s" type))))))
 
@@ -248,7 +250,6 @@
 
 (defn run [ctx]
   (loop [ctx' ctx]
-    (println "cycles" (:cycle-num ctx') (:cycle-limit ctx'))
     (if (or (> (:cycle-num ctx') (:cycle-limit ctx')) (:stopped ctx'))
       ctx'
       (recur (step ctx')))))
@@ -263,7 +264,7 @@
 (defn -main [& args]
   (let [opts (parse-opts args cli-options)
         {:keys [rom cycle-limit]} (:options opts)
-        _ (println opts)
+        ;; _ (println opts)
         ctx   (init rom)
         ctx'  (assoc ctx :cycle-limit (or cycle-limit ##Inf))]
     (run ctx')))
