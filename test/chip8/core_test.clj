@@ -14,6 +14,62 @@
     (is (= 0x00 (sut/read-reg ctx :v0)))
     (is (= 0xA6 (sut/read-reg ctx' :v0)))))
 
+(deftest pixels-for-b
+   (is (= [[1 2] [3 2] [6 2] [7 2]] (sut/pixels-for-b 1 2 2r10100110)))
+   (is (= [[60 2] [61 2] [62 2] [63 2] [0 2] [1 2] [2 2] [3 2]]
+          (sut/pixels-for-b 60 2 0xFF))))
+
+(deftest draw
+  (let [ctx (sut/run (sut/init [0x60 0x02  ;; LD V0, 0x02
+                                0x61 0x04  ;; LD V1, 0x04
+                                0x62 0x0E  ;; LD V2, 0x0E
+                                0xF2 0x29  ;; LD F, V2
+                                0xD0 0x15  ;; DRW V0, V1, 5
+
+                                ;; Draw zero spanning all four corners
+                                0x60 0x3E  ;; LD V0, 0x3D (62)
+                                0x61 0x1D  ;; LD V1, 0x1D (29)
+                                0x62 0x00  ;; LD V2, 0x00
+                                0xF2 0x29  ;; LD F, V2
+                                0xD0 0x15  ;; DRW V0, V1, 5
+                                0x00 0xFD]))]
+
+    (is (= [
+             " X                                                            X "
+             "XX                                                            XX"
+             "                                                                "
+             "                                                                "
+             "  XXXX                                                          "
+             "  X                                                             "
+             "  XXXX                                                          "
+             "  X                                                             "
+             "  XXXX                                                          "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "                                                                "
+             "XX                                                            XX"
+             " X                                                            X "
+             " X                                                            X "]
+          (sut/render ctx)))))
+
+
 (deftest load-simple
   (let [ctx (sut/init [0x60 0xAF
                        0x61 0x11

@@ -1,6 +1,7 @@
 (ns chip8.core
   (:require [chip8.bytes :as bytes]
-            [clojure.core.match :refer [match]]))
+            [clojure.core.match :refer [match]]
+            [clojure.string :as str]))
 
 (def sprites [0xF0, 0x90, 0x90, 0x90, 0xF0, ;; 0
               0x20, 0x60, 0x20, 0x20, 0x70, ;; 1
@@ -55,12 +56,17 @@
      :stack (apply vector-of :short (repeat 16 0x0000))
      :display (vec (repeat 32 (vec (repeat 64 false))))}))
 
+(defn render [ctx]
+  (->> (ctx :display)
+       (map #(map {true "X", false " "} %))
+       (map str/join)))
+
 (defn read-ram [ctx addr]
   (let [address (bytes/to-u16 addr)]
     (bytes/to-u8
       (cond
         ;; 0x0000 - 0x01FF: Reserved - original interpreter lived here
-        (> 0x0200 address) (throw (Exception. (format "Illegal memory access %04X" address)))
+        ;; 0x0200 - 0x0FFF: RAM
         (>= 0x0FFF address) (get-in ctx [:ram address])
         :else (throw (Exception. (format "Unmapped bus address: %04X" address)))))))
 
@@ -71,7 +77,7 @@
       ;; 0x0000 - 0x01FF: Reserved - original interpreter lived here
       (> 0x0200 address) (throw (Exception. (format "Illegal memory access %04X" address)))
 
-      ;; 0x0200 - 0xFFFF RAM
+      ;; 0x0200 - 0x0FFF RAM
       (>= 0x0FFF address) (assoc-in ctx [:ram address] value)
       :else (throw (Exception. (format "Unmapped bus address: %04X" address))))))
 
@@ -96,8 +102,10 @@
         lo  (bit-and 0xFF op)]
     (match [op n3 n2 n1 n0]
       [0x00FD _ _ _ _] {:type :exit}
+      [_ 0x1 _ _ _]  {:type :jump, :mode :d12, :data nnn}        ;; Annn - LD I, addr
       [_ 0xA _ _ _]  {:type :load, :mode :register_d12, :reg1 :i, :data nnn}        ;; Annn - LD I, addr
       [_ 0x6 _ _ _]  {:type :load, :mode :register_d8, :reg1 (to-vx n2), :data lo}
+      [_ 0xD _ _ _]  {:type :draw, :reg1 (to-vx n2), :reg2 (to-vx n1), :data n0}
       [_ 0xF _ 0x0 0x7]  {:type :load, :mode :register_register, :reg1 (to-vx n2), :reg2 :dt}
       [_ 0xF _ 0x0 0xA]  {:type :load, :mode :register_key, :reg1 (to-vx n2), :reg2 (throw (Exception. "Unimplemented: keys"))} ;; TODO LD Vx, KEY
       [_ 0xF _ 0x1 0x5]  {:type :load, :mode :register_register, :reg1 :dt, :reg2 (to-vx n2)}
@@ -105,7 +113,7 @@
       [_ 0xF _ 0x2 0x9]  {:type :load, :mode :register_digit, :reg1 :i, :reg2 (to-vx n2)}     ;; LD F, Vx (digit address load)
       [_ 0xF _ 0x3 0x3]  {:type :load, :mode :memloc_bcd, :reg1 :i, :reg2 (to-vx n2)}     ;; LD B, Vx (BCD load)
       [_ 0xF _ 0x5 0x5]  {:type :load, :mode :memloc_bulk, :reg1 :i, :data n2}      ;; LD [I], Vx (dump bulk registers)
-      [_ 0xF _ 0x6 0x5]  {:type :load, :mode :bulk_memloc, :reg2 :i, :data n2}            ;; LD Vx, [I] (load bulk registers)
+      [_ 0xF _ 0x6 0x5]  {:type :load, :mode :bulk_memloc, :reg1 :i, :data n2}            ;; LD Vx, [I] (load bulk registers)
       :else (throw (Exception. (format "Unhandled opcode %04X" op))))))
 
 (defn fetch-instruction [ctx]
@@ -119,6 +127,16 @@
                :cur-instr (instruction-for-opcode op))
         (write-reg :pc (+ 2 pc)))))
 
+(defn- load-registers [ctx]
+  (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)
+        regs (take (inc data) (registers))
+        pairs (map vector regs (iterate inc (read-reg ctx reg1)))]
+    (reduce
+     (fn [ctx' [r addr]]
+       (write-reg ctx' r (read-ram ctx' addr)))
+     ctx
+     pairs)))
+
 (defn- dump-registers [ctx]
   (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)
         regs (take (inc data) (registers))
@@ -129,9 +147,32 @@
      ctx
      pairs)))
 
+(defn pixels-for-b [x y b]
+  (->> (map vector (range 7 -1 -1) (iterate #(mod (inc %) 64) x) (repeat y))
+       (filter (fn [[bit]] (bit-test b bit)))
+       (map (fn [[_ x y]] [x y]))))
+
+(defn- draw [ctx]
+  (let [{:keys [reg1 reg2 data]} (:cur-instr ctx)
+        addr (read-reg ctx :i)
+        addrs (take data (iterate inc addr))
+        sprite-bytes (map #(read-ram ctx %) addrs)
+        x            (read-reg ctx reg1)
+        y            (read-reg ctx reg2)
+        pixels       (map pixels-for-b
+                          (repeat x)
+                          (iterate #(mod (inc %) 32) y)
+                          sprite-bytes)
+        _          (println "pix" pixels)]
+     (reduce (fn [ctx' [x y]] (assoc-in ctx' [:display y x] true))
+             ctx
+             pixels)))
+
 (defn execute [ctx]
   (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)]
     (match [type mode]
+      [:jump :d12]          (write-reg ctx :pc data)
+      [:draw _]             (draw ctx)
       [:load :register_d8]  (write-reg ctx reg1 data)
       [:load :register_d12] (write-reg ctx reg1 data)
       [:load :register_register] (write-reg ctx reg1 (read-reg ctx reg2))
@@ -142,6 +183,7 @@
                                         (write-ram (+ 1 addr) t)
                                         (write-ram (+ 2 addr) o)))
       [:load, :memloc_bulk] (dump-registers ctx)
+      [:load, :bulk_memloc] (load-registers ctx)
       [:exit _]             (assoc ctx :stopped true)
       :else (throw (Exception. (format "Unhandled instruction %s" type))))))
 
@@ -160,7 +202,7 @@
         _ (println (format "%04X: %-12s (%02X %02X)"
                             pc
         ;;                     (get-in ctx'' [:emu :ticks])
-                            (get-in ctx' [:cpu :cur-instr :type])
+                            (get-in ctx' [:cur-instr :type])
                             (read-ram ctx' (+ pc 1))
                             (read-ram ctx' (+ pc 2))))
         ;;                     (r/read-reg ctx'' :a)
@@ -175,6 +217,7 @@
         ;;                     (r/read-reg ctx'' :h)
         ;;                     (r/read-reg ctx'' :l)
         ;;                     (r/read-reg ctx'' :sp)))
+        ;; _ (println (render ctx))
         ctx'' (execute ctx')]
    ctx''))
 
