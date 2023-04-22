@@ -136,6 +136,8 @@
       [_ 0x8 _ _ 0xE]  {:type :shl, :mode :register, :reg1 (to-vx n2)}                ;;   8xy6 - SHR Vx {, Vy}
       [_ 0x9 _ _ 0]  {:type :skip, :mode :register_register, :cond :ne, :reg1 (to-vx n2) :reg2 (to-vx n1)} ;;  9xy0 - SNE Vx, Vy
       [_ 0xA _ _ _]  {:type :load, :mode :register_d12, :reg1 :i, :data nnn}        ;; Annn - LD I, addr
+      [_ 0xB _ _ _]  {:type :jump, :mode :register_d12, :reg1 :v0, :data nnn}        ;; Bnnn - JP V0, addr
+      [_ 0xC _ _ _]  {:type :rand, :mode :register_d8, :reg1 (to-vx n1), :data lo}        ;; Bnnn - JP V0, addr
       [_ 0xD _ _ _]  {:type :draw, :reg1 (to-vx n2), :reg2 (to-vx n1), :data n0}
       [_ 0xF _ 0x0 0x7]  {:type :load, :mode :register_register, :reg1 (to-vx n2), :reg2 :dt}
       [_ 0xF _ 0x0 0xA]  {:type :load, :mode :register_key, :reg1 (to-vx n2), :reg2 (throw (Exception. "Unimplemented: keys"))} ;; TODO LD Vx, KEY
@@ -207,6 +209,8 @@
   (let [{:keys [type mode reg1 reg2 data cond]} (:cur-instr ctx)]
     (match [type mode]
       [:jump :d12]          (write-reg ctx :pc data)
+      [:jump :register_d12] (write-reg ctx :pc (+ data (read-reg ctx :v0)))
+      [:rand :register_d8]  (write-reg ctx reg1 (bit-and data (int (rand 0x100))))
       [:call _]             (let [pc (read-reg ctx :pc)
                                   sp (bytes/b-inc (read-reg ctx :sp))]
                               (-> ctx (update :stack assoc sp pc)
@@ -350,6 +354,5 @@
   (rem 0xAD 100)
 
   (count (map #(str %1 " - " %2) (registers) (take 100 (iterate inc 0xF1))))
-
 
   ,)
