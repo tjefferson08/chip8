@@ -57,7 +57,7 @@
                 :v8 0, :v9 0, :va 0, :vb 0
                 :vc 0, :vd 0, :ve 0, :vf 0
                 :dt 0, :st 0,
-                :sp -1
+                :sp 0xFF
                 :i 0x0000
                 :pc 0x0200}
      :cur-instr nil,
@@ -65,7 +65,8 @@
      :cycle-num 0,
      :waiting false,
      :ram (init-ram ram)
-     :stack (apply vector-of :short (repeat 16 0x0000))
+     ;; :stack (apply vector-of :short (repeat 16 0x0000))
+     :stack (zipmap (range 0 0x10) (repeat 0x0000))
      :display (init-display)}))
 
 (defn render [ctx]
@@ -207,13 +208,13 @@
     (match [type mode]
       [:jump :d12]          (write-reg ctx :pc data)
       [:call _]             (let [pc (read-reg ctx :pc)
-                                  sp (inc (read-reg ctx :sp))]
+                                  sp (bytes/b-inc (read-reg ctx :sp))]
                               (-> ctx (update :stack assoc sp pc)
                                       (write-reg :sp sp)
                                       (write-reg :pc data)))
       [:ret _]              (let [sp  (read-reg ctx :sp)
                                   pc  (get-in ctx [:stack sp])
-                                  sp' (dec sp)]
+                                  sp' (bytes/b-dec sp)]
                               (-> ctx (write-reg :sp sp')
                                       (write-reg :pc pc)))
       [:clear _]             (clear-display ctx)

@@ -54,6 +54,9 @@
         ones     (mod rm 10)]
    [hundreds tens ones]))
 
+(defn b-inc [b] (to-u8 (inc b)))
+(defn b-dec [b] (to-u8 (dec b)))
+
 (defn slice
   ""
   [bytes from to]
