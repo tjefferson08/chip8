@@ -186,6 +186,41 @@
     (is (= 0xFD (sut/read-reg ctx :v2)))
     (is (= 0x00 (sut/read-reg ctx :v3)))))
 
+(deftest skip
+  (let [ctx (sut/init [0x60 0xAF ;; LD V0, 0xAF
+                       0x30 0xAF ;; SE V0, 0xAF
+                       0x60 0x11
+                       0x00 0xFD])  ;; EXIT
+        ctx' (sut/run ctx)]
+    (is (= 0xAF (sut/read-reg ctx' :v0)))
+    (is (not= 0x00 (sut/read-reg ctx' :v0))))
+
+  (let [ctx (sut/init [0x60 0xAF ;; LD V0, 0xAF
+                       0x40 0x99 ;; SNE V0, 0x99
+                       0x60 0x11
+                       0x00 0xFD])  ;; EXIT
+        ctx' (sut/run ctx)]
+    (is (= 0xAF (sut/read-reg ctx' :v0)))
+    (is (not= 0x00 (sut/read-reg ctx' :v0))))
+
+  (let [ctx (sut/init [0x60 0xAF ;; LD V0, 0xAF
+                       0x61 0xAF ;; LD V1, 0xAF
+                       0x50 0x10 ;; SE V0, V1
+                       0x60 0x11
+                       0x00 0xFD])  ;; EXIT
+        ctx' (sut/run ctx)]
+    (is (= 0xAF (sut/read-reg ctx' :v0)))
+    (is (not= 0x00 (sut/read-reg ctx' :v0))))
+
+  (let [ctx (sut/init [0x60 0xAF ;; LD V0, 0xAF
+                       0x61 0x99 ;; LD V1, 0x99
+                       0x90 0x10 ;; SE V0, V1
+                       0x60 0x11
+                       0x00 0xFD])  ;; EXIT
+        ctx' (sut/run ctx)]
+    (is (= 0xAF (sut/read-reg ctx' :v0)))
+    (is (not= 0x00 (sut/read-reg ctx' :v0)))))
+
 
 
 (comment

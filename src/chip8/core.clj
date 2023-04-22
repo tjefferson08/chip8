@@ -57,7 +57,7 @@
                 :v8 0, :v9 0, :va 0, :vb 0
                 :vc 0, :vd 0, :ve 0, :vf 0
                 :dt 0, :st 0,
-                :sp 0
+                :sp -1
                 :i 0x0000
                 :pc 0x0200}
      :cur-instr nil,
@@ -115,15 +115,32 @@
     (match [op n3 n2 n1 n0]
       [0x00FD _ _ _ _] {:type :exit}
       [0x00E0 _ _ _ _] {:type :clear} ;; CLD - Clear the display
+      [0x00EE _ _ _ _] {:type :ret}        ;; RET
       [_ 0x1 _ _ _]  {:type :jump, :mode :d12, :data nnn}        ;; Annn - LD I, addr
-      [_ 0xA _ _ _]  {:type :load, :mode :register_d12, :reg1 :i, :data nnn}        ;; Annn - LD I, addr
+      [_ 0x2 _ _ _]  {:type :call, :mode :d12, :data nnn}        ;; 2nnn - CALL addr
+      [_ 0x3 _ _ _]  {:type :skip, :mode :register_d8, :cond :eq, :reg1 (to-vx n2) :data lo} ;;  3xkk - SE Vx, byte
+      [_ 0x4 _ _ _]  {:type :skip, :mode :register_d8, :cond :ne, :reg1 (to-vx n2) :data lo} ;;  4xkk - SNE Vx, byte
+      [_ 0x5 _ _ 0]  {:type :skip, :mode :register_register, :cond :eq, :reg1 (to-vx n2) :reg2 (to-vx n1)} ;;  5xy0 - SE Vx, Vy
       [_ 0x6 _ _ _]  {:type :load, :mode :register_d8, :reg1 (to-vx n2), :data lo}
       [_ 0x7 _ _ _]  {:type :add, :mode :register_d8, :reg1 (to-vx n2) :data lo};; 7xkk - ADD Vx, byte
+      [_ 0x8 _ _ 0]  {:type :load, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; LD Vx, Vy
+      [_ 0x8 _ _ 1]  {:type :or, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; OR Vx, Vy
+      [_ 0x8 _ _ 2]  {:type :and, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; AND Vx, Vy
+      [_ 0x8 _ _ 3]  {:type :xor, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; XOR Vx, Vy
+      [_ 0x8 _ _ 4]  {:type :add, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; ADD Vx, Vy
+      [_ 0x8 _ _ 5]  {:type :sub, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; SUB Vx, Vy
+      [_ 0x8 _ _ 6]  {:type :shr, :mode :register, :reg1 (to-vx n2)}                ;;   8xy6 - SHR Vx {, Vy}
+
+      [_ 0x8 _ _ 7]  {:type :subn, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; SUBN Vx, Vy
+      [_ 0x8 _ _ 0xE]  {:type :shl, :mode :register, :reg1 (to-vx n2)}                ;;   8xy6 - SHR Vx {, Vy}
+      [_ 0x9 _ _ 0]  {:type :skip, :mode :register_register, :cond :ne, :reg1 (to-vx n2) :reg2 (to-vx n1)} ;;  9xy0 - SNE Vx, Vy
+      [_ 0xA _ _ _]  {:type :load, :mode :register_d12, :reg1 :i, :data nnn}        ;; Annn - LD I, addr
       [_ 0xD _ _ _]  {:type :draw, :reg1 (to-vx n2), :reg2 (to-vx n1), :data n0}
       [_ 0xF _ 0x0 0x7]  {:type :load, :mode :register_register, :reg1 (to-vx n2), :reg2 :dt}
       [_ 0xF _ 0x0 0xA]  {:type :load, :mode :register_key, :reg1 (to-vx n2), :reg2 (throw (Exception. "Unimplemented: keys"))} ;; TODO LD Vx, KEY
       [_ 0xF _ 0x1 0x5]  {:type :load, :mode :register_register, :reg1 :dt, :reg2 (to-vx n2)}
       [_ 0xF _ 0x1 0x8]  {:type :load, :mode :register_register, :reg1 :st, :reg2 (to-vx n2)} ;; LD ST, Vx
+      [_ 0xF _ 0x1 0xE]  {:type :add, :mode :register_register, :reg1 :i, :reg2 (to-vx n2)} ;; ADD I, Vx
       [_ 0xF _ 0x2 0x9]  {:type :load, :mode :register_digit, :reg1 :i, :reg2 (to-vx n2)}     ;; LD F, Vx (digit address load)
       [_ 0xF _ 0x3 0x3]  {:type :load, :mode :memloc_bcd, :reg1 :i, :reg2 (to-vx n2)}     ;; LD B, Vx (BCD load)
       [_ 0xF _ 0x5 0x5]  {:type :load, :mode :memloc_bulk, :reg1 :i, :data n2}      ;; LD [I], Vx (dump bulk registers)
@@ -186,9 +203,19 @@
   (assoc ctx :display (init-display)))
 
 (defn execute [ctx]
-  (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)]
+  (let [{:keys [type mode reg1 reg2 data cond]} (:cur-instr ctx)]
     (match [type mode]
       [:jump :d12]          (write-reg ctx :pc data)
+      [:call _]             (let [pc (read-reg ctx :pc)
+                                  sp (inc (read-reg ctx :sp))]
+                              (-> ctx (update :stack assoc sp pc)
+                                      (write-reg :sp sp)
+                                      (write-reg :pc data)))
+      [:ret _]              (let [sp  (read-reg ctx :sp)
+                                  pc  (get-in ctx [:stack sp])
+                                  sp' (dec sp)]
+                              (-> ctx (write-reg :sp sp')
+                                      (write-reg :pc pc)))
       [:clear _]             (clear-display ctx)
       [:draw _]             (let [ctx' (draw ctx)]
                               (println (render ctx'))
@@ -205,6 +232,39 @@
       [:load, :memloc_bulk] (dump-registers ctx)
       [:load, :bulk_memloc] (load-registers ctx)
       [:add, :register_d8]  (write-reg ctx reg1 (+ data (read-reg ctx reg1)))
+      [:add, :register_register] (let [a (read-reg ctx reg1)
+                                       b (read-reg ctx reg2)
+                                       n (+ a b)
+                                       vf (if (> n 0xFF) 1 0)]
+                                   (-> ctx (write-reg reg1 n)
+                                           (write-reg :vf vf)))
+      [:sub, :register_register] (let [a (read-reg ctx reg1)
+                                       b (read-reg ctx reg2)
+                                       n (- a b)
+                                       vf (if (pos? n) 1 0)]
+                                   (-> ctx (write-reg reg1 n)
+                                           (write-reg :vf vf)))
+      [:subn, :register_register] (let [a (read-reg ctx reg1)
+                                        b (read-reg ctx reg2)
+                                        n (- b a)
+                                        vf (if (pos? n) 1 0)]
+                                    (-> ctx (write-reg reg1 n)
+                                            (write-reg :vf vf)))
+      [(:or :shr :shl), _] (let [r (read-reg ctx reg1)
+                                 [bit op]  ({:shr [0 bit-shift-right], :shl [7 bit-shift-left]} type)]
+                             (-> ctx (write-reg :vf (if (bit-test r bit) 1 0))
+                                     (write-reg reg1 (op r 1))))
+
+      [:or, :register_register]  (write-reg ctx reg1 (bit-or (read-reg ctx reg1) (read-reg ctx reg2)))
+      [:and, :register_register]  (write-reg ctx reg1 (bit-and (read-reg ctx reg1) (read-reg ctx reg2)))
+      [:xor, :register_register]  (write-reg ctx reg1 (bit-xor (read-reg ctx reg1) (read-reg ctx reg2)))
+      [:skip, _] (let [a (read-reg ctx reg1)
+                       b (if (= mode :register_d8) data (read-reg ctx reg2))
+                       comp ({:eq =, :ne not=} cond)]
+                   (if (comp a b)
+                     (write-reg ctx :pc (+ 2 (read-reg ctx :pc)))
+                     ctx))
+
       [:exit _]             (assoc ctx :stopped true)
       :else (throw (Exception. (format "Unhandled instruction %s" type))))))
 
@@ -220,12 +280,14 @@
         ;; ctx'' (fetch/fetch-data ctx')
         ;; ;; _ (println (str "ctx after fetch-data" (:cpu ctx'')))
         pc   (read-reg ctx :pc)
-        _ (println (format "%04X: %-12s (%02X %02X)"
+        _ (println (format "%04X: %-12s (%02X %02X) SP:%01X[%04X]"
                             pc
         ;;                     (get-in ctx'' [:emu :ticks])
                             (get-in ctx' [:cur-instr :type])
+                            (read-ram ctx' pc)
                             (read-ram ctx' (+ pc 1))
-                            (read-ram ctx' (+ pc 2))))
+                            (read-reg ctx' :sp)
+                            (get (ctx' :stack) (read-reg ctx' :sp))))
         ;;                     (r/read-reg ctx'' :a)
         ;;                     (if (flags/flag-set? ctx'' :z) "Z" "-")
         ;;                     (if (flags/flag-set? ctx'' :n) "N" "-")
