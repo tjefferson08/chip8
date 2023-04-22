@@ -1,7 +1,8 @@
 (ns chip8.core
   (:require [chip8.bytes :as bytes]
             [clojure.core.match :refer [match]]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.tools.cli :refer [parse-opts]]))
 
 (def sprites [0xF0, 0x90, 0x90, 0x90, 0xF0, ;; 0
               0x20, 0x60, 0x20, 0x20, 0x70, ;; 1
@@ -19,6 +20,12 @@
               0xE0, 0x90, 0x90, 0x90, 0xE0,
               0xF0, 0x80, 0xF0, 0x80, 0xF0,
               0xF0, 0x80, 0xF0, 0x80, 0x80])
+
+(def DISPLAY_WIDTH 64)
+
+(def DISPLAY_HEIGHT 32)
+;; (def DISPLAY_WIDTH 128)
+;; (def DISPLAY_HEIGHT 64)
 
 (defn sprite-address [digit]
   (* digit 0x5))
@@ -39,13 +46,16 @@
        (map #(.toLowerCase %))
        (map keyword)))
 
+(defn- init-display []
+  (vec (repeat DISPLAY_HEIGHT (vec (repeat DISPLAY_WIDTH false)))))
+
 (defn init
   ([] (init (vector-of :byte 0x00)))
   ([ram]
    {:registers {:v0 0, :v1 0, :v2 0, :v3 0
                 :v4 0, :v5 0, :v6 0, :v7 0
-                :v8 0, :v9 0, :vA 0, :vB 0
-                :vC 0, :vD 0, :vE 0, :vF 0
+                :v8 0, :v9 0, :va 0, :vb 0
+                :vc 0, :vd 0, :ve 0, :vf 0
                 :dt 0, :st 0,
                 :sp 0
                 :i 0x0000
@@ -54,12 +64,12 @@
      :waiting false,
      :ram (init-ram ram)
      :stack (apply vector-of :short (repeat 16 0x0000))
-     :display (vec (repeat 32 (vec (repeat 64 false))))}))
+     :display (init-display)}))
 
 (defn render [ctx]
   (->> (ctx :display)
-       (map #(map {true "X", false " "} %))
-       (map str/join)))
+       (map #(str/join (map {true "X", false " "} %)))
+       (str/join "\n")))
 
 (defn read-ram [ctx addr]
   (let [address (bytes/to-u16 addr)]
@@ -102,6 +112,7 @@
         lo  (bit-and 0xFF op)]
     (match [op n3 n2 n1 n0]
       [0x00FD _ _ _ _] {:type :exit}
+      [0x00E0 _ _ _ _] {:type :clear} ;; CLD - Clear the display
       [_ 0x1 _ _ _]  {:type :jump, :mode :d12, :data nnn}        ;; Annn - LD I, addr
       [_ 0xA _ _ _]  {:type :load, :mode :register_d12, :reg1 :i, :data nnn}        ;; Annn - LD I, addr
       [_ 0x6 _ _ _]  {:type :load, :mode :register_d8, :reg1 (to-vx n2), :data lo}
@@ -148,7 +159,7 @@
      pairs)))
 
 (defn pixels-for-b [x y b]
-  (->> (map vector (range 7 -1 -1) (iterate #(mod (inc %) 64) x) (repeat y))
+  (->> (map vector (range 7 -1 -1) (iterate #(mod (inc %) DISPLAY_WIDTH) x) (repeat y))
        (filter (fn [[bit]] (bit-test b bit)))
        (map (fn [[_ x y]] [x y]))))
 
@@ -159,20 +170,26 @@
         sprite-bytes (map #(read-ram ctx %) addrs)
         x            (read-reg ctx reg1)
         y            (read-reg ctx reg2)
-        pixels       (map pixels-for-b
-                          (repeat x)
-                          (iterate #(mod (inc %) 32) y)
-                          sprite-bytes)
-        _          (println "pix" pixels)]
-     (reduce (fn [ctx' [x y]] (assoc-in ctx' [:display y x] true))
+        pixels       (mapcat pixels-for-b
+                             (repeat x)
+                             (iterate #(mod (inc %) DISPLAY_HEIGHT) y)
+                             sprite-bytes)]
+        ;; _          (println "pix" pixels)]
+     (reduce (fn [ctx' [x y]] (update-in ctx' [:display y x] not))
              ctx
              pixels)))
+
+(defn- clear-display [ctx]
+  (assoc ctx :display (init-display)))
 
 (defn execute [ctx]
   (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)]
     (match [type mode]
       [:jump :d12]          (write-reg ctx :pc data)
-      [:draw _]             (draw ctx)
+      [:clear _]             (clear-display ctx)
+      [:draw _]             (let [ctx' (draw ctx)]
+                              (println (render ctx'))
+                              ctx')
       [:load :register_d8]  (write-reg ctx reg1 data)
       [:load :register_d12] (write-reg ctx reg1 data)
       [:load :register_register] (write-reg ctx reg1 (read-reg ctx reg2))
@@ -232,6 +249,16 @@
     (if (:stopped ctx')
       ctx'
       (recur (step ctx')))))
+
+(def cli-options
+  [["-r" "--rom ROM" "ROM path"]
+   ["-h" "--help"]])
+
+(defn -main [& args]
+  (let [opts (parse-opts args cli-options)
+        ctx  (init (get-in opts [:options :rom]))]
+    (run ctx)))
+
 
 (comment
   (println "sup")

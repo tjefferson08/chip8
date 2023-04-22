@@ -1,6 +1,7 @@
 (ns chip8.core-test
   (:require [clojure.test :refer :all]
-            [chip8.core :as sut]))
+            [chip8.core :as sut]
+            [clojure.string :as str]))
 
 (deftest to-vx
   (is (= :v0 (sut/to-vx 0x0)))
@@ -34,40 +35,88 @@
                                 0xD0 0x15  ;; DRW V0, V1, 5
                                 0x00 0xFD]))]
 
-    (is (= [
-             " X                                                            X "
-             "XX                                                            XX"
-             "                                                                "
-             "                                                                "
-             "  XXXX                                                          "
-             "  X                                                             "
-             "  XXXX                                                          "
-             "  X                                                             "
-             "  XXXX                                                          "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "                                                                "
-             "XX                                                            XX"
-             " X                                                            X "
-             " X                                                            X "]
-          (sut/render ctx)))))
+    (is (=
+         (str/join "\n"
+           [
+            " X                                                            X "
+            "XX                                                            XX"
+            "                                                                "
+            "                                                                "
+            "  XXXX                                                          "
+            "  X                                                             "
+            "  XXXX                                                          "
+            "  X                                                             "
+            "  XXXX                                                          "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "XX                                                            XX"
+            " X                                                            X "
+            " X                                                            X "])
+         (sut/render ctx))))
+
+  (let [ctx (sut/run (sut/init [0x60 0x02  ;; LD V0, 0x02
+                                0x61 0x04  ;; LD V1, 0x04
+                                0x62 0x0E  ;; LD V2, 0x0E
+                                0xF2 0x29  ;; LD F, V2
+                                0xD0 0x15  ;; DRW V0, V1, 5
+                                0xD0 0x15  ;; DRW V0, V1, 5
+                                0x00 0xFD]))]
+
+    (is (=
+         (str/join "\n"
+           [
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "
+            "                                                                "])
+         (sut/render ctx)))))
+
 
 
 (deftest load-simple
