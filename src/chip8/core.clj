@@ -72,8 +72,8 @@
      :ram (init-ram ram)
      :stack (zipmap (range 0 0x10) (repeat 0x0000))
      :display (init-display)
-     :renderer-type :fx
-     :renderer (ui/init-renderer)}))
+     :renderer-type :console
+     :renderer nil}))
 
 (defmulti render :renderer-type)
 
@@ -359,7 +359,8 @@
         {:keys [rom cycle-limit]} (:options opts)
         ;; _ (println opts)
         ctx   (init rom)
-        ctx'  (assoc ctx :cycle-limit (or cycle-limit ##Inf))]
+        ctx'  (assoc ctx :cycle-limit (or cycle-limit ##Inf))
+        ctx'  (assoc ctx :renderer-type :fx, :renderer (ui/init-renderer))]
    (run ctx')))
 
 
