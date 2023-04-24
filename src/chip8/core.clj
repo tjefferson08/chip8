@@ -2,7 +2,12 @@
   (:require [chip8.bytes :as bytes]
             [clojure.core.match :refer [match]]
             [clojure.string :as str]
-            [clojure.tools.cli :refer [parse-opts]]))
+            [clojure.tools.cli :refer [parse-opts]]
+            ;; [io.github.humbleui.ui :as ui]
+            ;; [io.github.humbleui.window :as window]
+            [chip8.ui :as ui]
+            [cljfx.api :as fx]))
+
 
 (def sprites [0xF0, 0x90, 0x90, 0x90, 0xF0, ;; 0
               0x20, 0x60, 0x20, 0x20, 0x70, ;; 1
@@ -26,6 +31,9 @@
 (def DISPLAY_HEIGHT 32)
 ;; (def DISPLAY_WIDTH 128)
 ;; (def DISPLAY_HEIGHT 64)
+(defn init-display []
+  (vec (repeat DISPLAY_HEIGHT (vec (repeat DISPLAY_WIDTH false)))))
+
 
 (defn sprite-address [digit]
   (* digit 0x5))
@@ -46,9 +54,6 @@
        (map #(.toLowerCase %))
        (map keyword)))
 
-(defn- init-display []
-  (vec (repeat DISPLAY_HEIGHT (vec (repeat DISPLAY_WIDTH false)))))
-
 (defn init
   ([] (init (vector-of :byte 0x00)))
   ([ram]
@@ -65,14 +70,21 @@
      :cycle-num 0,
      :waiting false,
      :ram (init-ram ram)
-     ;; :stack (apply vector-of :short (repeat 16 0x0000))
      :stack (zipmap (range 0 0x10) (repeat 0x0000))
-     :display (init-display)}))
+     :display (init-display)
+     :renderer-type :fx
+     :renderer (ui/init-renderer)}))
 
-(defn render [ctx]
+(defmulti render :renderer-type)
+
+(defmethod render :console [ctx]
   (->> (ctx :display)
        (map #(str/join (map {true "X", false " "} %)))
-       (str/join "\n")))
+       (str/join "\n")
+       (println)))
+
+(defmethod render :fx [ctx]
+  ((ctx :renderer) {:display (:display ctx)}))
 
 (defn read-ram [ctx addr]
   (let [address (bytes/to-u16 addr)]
@@ -139,8 +151,10 @@
       [_ 0xB _ _ _]  {:type :jump, :mode :register_d12, :reg1 :v0, :data nnn}        ;; Bnnn - JP V0, addr
       [_ 0xC _ _ _]  {:type :rand, :mode :register_d8, :reg1 (to-vx n1), :data lo}        ;; Bnnn - JP V0, addr
       [_ 0xD _ _ _]  {:type :draw, :reg1 (to-vx n2), :reg2 (to-vx n1), :data n0}
+      [_ 0xE _ 0x9 0xE]  {:type :skip, :mode :key, :compare =, :reg1 (to-vx n2)}
+      [_ 0xE _ 0xA 0x1]  {:type :skip, :mode :key, :compare not=, :reg1 (to-vx n2)}
       [_ 0xF _ 0x0 0x7]  {:type :load, :mode :register_register, :reg1 (to-vx n2), :reg2 :dt}
-      [_ 0xF _ 0x0 0xA]  {:type :load, :mode :register_key, :reg1 (to-vx n2), :reg2 (throw (Exception. "Unimplemented: keys"))} ;; TODO LD Vx, KEY
+      [_ 0xF _ 0x0 0xA]  {:type :load, :mode :register_key, :reg1 (to-vx n2)} ;; LD Vx, KEY
       [_ 0xF _ 0x1 0x5]  {:type :load, :mode :register_register, :reg1 :dt, :reg2 (to-vx n2)}
       [_ 0xF _ 0x1 0x8]  {:type :load, :mode :register_register, :reg1 :st, :reg2 (to-vx n2)} ;; LD ST, Vx
       [_ 0xF _ 0x1 0xE]  {:type :add, :mode :register_register, :reg1 :i, :reg2 (to-vx n2)} ;; ADD I, Vx
@@ -206,7 +220,7 @@
   (assoc ctx :display (init-display)))
 
 (defn execute [ctx]
-  (let [{:keys [type mode reg1 reg2 data cond]} (:cur-instr ctx)]
+  (let [{:keys [type mode reg1 reg2 data cond compare]} (:cur-instr ctx)]
     (match [type mode]
       [:jump :d12]          (write-reg ctx :pc data)
       [:jump :register_d12] (write-reg ctx :pc (+ data (read-reg ctx :v0)))
@@ -223,7 +237,7 @@
                                       (write-reg :pc pc)))
       [:clear _]             (clear-display ctx)
       [:draw _]             (let [ctx' (draw ctx)]
-                              (println (render ctx'))
+                              (render ctx')
                               ctx')
       [:load :register_d8]  (write-reg ctx reg1 data)
       [:load :register_d12] (write-reg ctx reg1 data)
@@ -236,6 +250,7 @@
                                         (write-ram (+ 2 addr) o)))
       [:load, :memloc_bulk] (dump-registers ctx)
       [:load, :bulk_memloc] (load-registers ctx)
+      [:load, :register_key] (let [key (.next (:scanner ctx))]) ;; reader.next().trim().charAt(0));])
       [:add, :register_d8]  (write-reg ctx reg1 (+ data (read-reg ctx reg1)))
       [:add, :register_register] (let [a (read-reg ctx reg1)
                                        b (read-reg ctx reg2)
@@ -263,6 +278,12 @@
       [:or, :register_register]  (write-reg ctx reg1 (bit-or (read-reg ctx reg1) (read-reg ctx reg2)))
       [:and, :register_register]  (write-reg ctx reg1 (bit-and (read-reg ctx reg1) (read-reg ctx reg2)))
       [:xor, :register_register]  (write-reg ctx reg1 (bit-xor (read-reg ctx reg1) (read-reg ctx reg2)))
+      [:skip, :key] (let [r (read-reg ctx reg1)
+                          key (.next (:scanner ctx)) ;; reader.next().trim().charAt(0));])
+                          _ (println "reg:" r " / key:" key)]
+                        (if (compare r key)
+                          (write-reg ctx :pc (+ 2 (read-reg ctx :pc)))
+                          ctx))
       [:skip, _] (let [a (read-reg ctx reg1)
                        b (if (= mode :register_d8) data (read-reg ctx reg2))
                        comp ({:eq =, :ne not=} cond)]
@@ -285,12 +306,17 @@
         ;; ctx'' (fetch/fetch-data ctx')
         ;; ;; _ (println (str "ctx after fetch-data" (:cpu ctx'')))
         pc   (read-reg ctx :pc)
-        _ (println (format "%04X: %-12s (%02X %02X) SP:%01X[%04X]"
+        _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X SP:%01X[%04X]"
                             pc
         ;;                     (get-in ctx'' [:emu :ticks])
                             (get-in ctx' [:cur-instr :type])
                             (read-ram ctx' pc)
                             (read-ram ctx' (+ pc 1))
+                            (read-reg ctx' :v0)
+                            (read-reg ctx' :v1)
+                            (read-reg ctx' :v2)
+                            (read-reg ctx' :v3)
+                            (read-reg ctx' :v4)
                             (read-reg ctx' :sp)
                             (get (ctx' :stack) (read-reg ctx' :sp))))
         ;;                     (r/read-reg ctx'' :a)
@@ -334,7 +360,7 @@
         ;; _ (println opts)
         ctx   (init rom)
         ctx'  (assoc ctx :cycle-limit (or cycle-limit ##Inf))]
-    (run ctx')))
+   (run ctx')))
 
 
 (comment

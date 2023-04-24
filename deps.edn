@@ -3,6 +3,7 @@
         org.clojure/core.match {:mvn/version "1.0.1"}
         org.clojure/tools.cli {:mvn/version "1.0.214"}
         io.github.humbleui/humbleui {:git/sha "4f4ac06f92fa7746652e690216c5c0330f88b4fe"}
+        cljfx {:git/url "https://github.com/cljfx/cljfx" :sha "ddea0fe5e3eca5e8b53f435c43db407b10e37480"}
         integrant/integrant {:mvn/version "0.8.0"}}
  :aliases
  {:test {:extra-paths ["test"]
