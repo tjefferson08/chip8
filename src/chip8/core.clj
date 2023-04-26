@@ -5,9 +5,7 @@
             [clojure.tools.cli :refer [parse-opts]]
             ;; [io.github.humbleui.ui :as ui]
             ;; [io.github.humbleui.window :as window]
-            [chip8.ui :as ui]
-            [cljfx.api :as fx]))
-
+            [chip8.ui :as ui]))
 
 (def sprites [0xF0, 0x90, 0x90, 0x90, 0xF0, ;; 0
               0x20, 0x60, 0x20, 0x20, 0x70, ;; 1
@@ -25,6 +23,7 @@
               0xE0, 0x90, 0x90, 0x90, 0xE0,
               0xF0, 0x80, 0xF0, 0x80, 0xF0,
               0xF0, 0x80, 0xF0, 0x80, 0x80])
+
 
 (def DISPLAY_WIDTH 64)
 
@@ -219,6 +218,14 @@
 (defn- clear-display [ctx]
   (assoc ctx :display (init-display)))
 
+(defn- wait-for-key [ctx]
+  (let [{:keys [reg1]} (:cur-instr ctx)]
+    (loop []
+      (let [pressed-keys (map first (filter (fn [[k v]] v) @ui/*keys))]
+        (if (empty? pressed-keys)
+          (recur)
+          (write-reg ctx reg1 (ui/->hex (first pressed-keys))))))))
+
 (defn execute [ctx]
   (let [{:keys [type mode reg1 reg2 data cond compare]} (:cur-instr ctx)]
     (match [type mode]
@@ -250,7 +257,7 @@
                                         (write-ram (+ 2 addr) o)))
       [:load, :memloc_bulk] (dump-registers ctx)
       [:load, :bulk_memloc] (load-registers ctx)
-      [:load, :register_key] (let [key (.next (:scanner ctx))]) ;; reader.next().trim().charAt(0));])
+      [:load, :register_key] (wait-for-key ctx)
       [:add, :register_d8]  (write-reg ctx reg1 (+ data (read-reg ctx reg1)))
       [:add, :register_register] (let [a (read-reg ctx reg1)
                                        b (read-reg ctx reg2)
@@ -279,9 +286,10 @@
       [:and, :register_register]  (write-reg ctx reg1 (bit-and (read-reg ctx reg1) (read-reg ctx reg2)))
       [:xor, :register_register]  (write-reg ctx reg1 (bit-xor (read-reg ctx reg1) (read-reg ctx reg2)))
       [:skip, :key] (let [r (read-reg ctx reg1)
-                          key (.next (:scanner ctx)) ;; reader.next().trim().charAt(0));])
-                          _ (println "reg:" r " / key:" key)]
-                        (if (compare r key)
+                          key (ui/->name r)
+                          pressed? (@ui/*keys key)]
+                          ;; _ (println "skip if key?" ui/keymap-by-hex @ui/*keys r key pressed?)]
+                        (if (compare true pressed?)
                           (write-reg ctx :pc (+ 2 (read-reg ctx :pc)))
                           ctx))
       [:skip, _] (let [a (read-reg ctx reg1)
@@ -319,18 +327,18 @@
                             (read-reg ctx' :v4)
                             (read-reg ctx' :sp)
                             (get (ctx' :stack) (read-reg ctx' :sp))))
-        ;;                     (r/read-reg ctx'' :a)
-        ;;                     (if (flags/flag-set? ctx'' :z) "Z" "-")
-        ;;                     (if (flags/flag-set? ctx'' :n) "N" "-")
-        ;;                     (if (flags/flag-set? ctx'' :h) "H" "-")
-        ;;                     (if (flags/flag-set? ctx'' :c) "C" "-")
-        ;;                     (r/read-reg ctx'' :b)
-        ;;                     (r/read-reg ctx'' :c)
-        ;;                     (r/read-reg ctx'' :d)
-        ;;                     (r/read-reg ctx'' :e)
-        ;;                     (r/read-reg ctx'' :h)
-        ;;                     (r/read-reg ctx'' :l)
-        ;;                     (r/read-reg ctx'' :sp)))
+                            ;; (r/read-reg ctx'' :a)
+                            ;; (if (flags/flag-set? ctx'' :z) "Z" "-")
+                            ;; (if (flags/flag-set? ctx'' :n) "N" "-")
+                            ;; (if (flags/flag-set? ctx'' :h) "H" "-")
+                            ;; (if (flags/flag-set? ctx'' :c) "C" "-")
+                            ;; (r/read-reg ctx'' :b)
+                            ;; (r/read-reg ctx'' :c)
+                            ;; (r/read-reg ctx'' :d)
+                            ;; (r/read-reg ctx'' :e)
+                            ;; (r/read-reg ctx'' :h)
+                            ;; (r/read-reg ctx'' :l)
+                            ;; (r/read-reg ctx'' :sp)))
         ;; _ (println (render ctx))
         ctx'' (execute ctx')]
    ctx''))
