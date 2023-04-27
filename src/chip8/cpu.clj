@@ -1,49 +1,19 @@
-(ns chip8.core
+(ns chip8.cpu
   (:require [chip8.bytes :as bytes]
             [clojure.core.match :refer [match]]
             [clojure.string :as str]
-            [clojure.tools.cli :refer [parse-opts]]
             ;; [io.github.humbleui.ui :as ui]
             ;; [io.github.humbleui.window :as window]
             [chip8.ui :as ui]))
 
-(def sprites [0xF0, 0x90, 0x90, 0x90, 0xF0, ;; 0
-              0x20, 0x60, 0x20, 0x20, 0x70, ;; 1
-              0xF0, 0x10, 0xF0, 0x80, 0xF0,
-              0xF0, 0x10, 0xF0, 0x10, 0xF0,
-              0x90, 0x90, 0xF0, 0x10, 0x10,
-              0xF0, 0x80, 0xF0, 0x10, 0xF0,
-              0xF0, 0x80, 0xF0, 0x90, 0xF0,
-              0xF0, 0x10, 0x20, 0x40, 0x40,
-              0xF0, 0x90, 0xF0, 0x90, 0xF0,
-              0xF0, 0x90, 0xF0, 0x10, 0xF0,
-              0xF0, 0x90, 0xF0, 0x90, 0x90,
-              0xE0, 0x90, 0xE0, 0x90, 0xE0,
-              0xF0, 0x80, 0x80, 0x80, 0xF0,
-              0xE0, 0x90, 0x90, 0x90, 0xE0,
-              0xF0, 0x80, 0xF0, 0x80, 0xF0,
-              0xF0, 0x80, 0xF0, 0x80, 0x80])
-
-
 (def DISPLAY_WIDTH 64)
-
 (def DISPLAY_HEIGHT 32)
-;; (def DISPLAY_WIDTH 128)
-;; (def DISPLAY_HEIGHT 64)
+
 (defn init-display []
   (vec (repeat DISPLAY_HEIGHT (vec (repeat DISPLAY_WIDTH false)))))
 
-
 (defn sprite-address [digit]
   (* digit 0x5))
-
-(defn init-ram [ram]
-  (let [reserved (apply vector-of :byte (map unchecked-byte (take 0x0200 (concat sprites (repeat 0x00)))))
-        program  (if (string? ram)
-                   (bytes/slurp-bytes ram)
-                   (into (vector-of :byte) (map unchecked-byte ram)))
-        empty    (repeat 0x00)]
-    (vec (take 0x0FFF (concat reserved program empty)))))
 
 (defn to-vx [x] (keyword (.toLowerCase (format "v%1x" x))))
 
@@ -54,7 +24,6 @@
        (map keyword)))
 
 (defn init
-  ([] (init (vector-of :byte 0x00)))
   ([ram]
    {:registers {:v0 0, :v1 0, :v2 0, :v3 0
                 :v4 0, :v5 0, :v6 0, :v7 0
@@ -68,7 +37,7 @@
      :cycle-limit ##Inf,
      :cycle-num 0,
      :waiting false,
-     :ram (init-ram ram)
+     :ram ram
      :stack (zipmap (range 0 0x10) (repeat 0x0000))
      :display (init-display)
      :renderer-type :console
@@ -349,27 +318,12 @@
                (step-running ctx))]
     (update ctx' :cycle-num inc)))
 
+;; TODO need separate thread and atom-ization for timer decrement @ 60Hz
 (defn run [ctx]
   (loop [ctx' ctx]
     (if (or (> (:cycle-num ctx') (:cycle-limit ctx')) (:stopped ctx'))
       ctx'
       (recur (step ctx')))))
-
-(def cli-options
-  [["-r" "--rom ROM" "ROM path"]
-   ["-c" "--cycle-limit CYCLES" "exit after excuting CYCLES instructions"
-    :default nil
-    :parse-fn #(Integer/parseInt %)]
-   ["-h" "--help"]])
-
-(defn -main [& args]
-  (let [opts (parse-opts args cli-options)
-        {:keys [rom cycle-limit]} (:options opts)
-        ;; _ (println opts)
-        ctx   (init rom)
-        ctx'  (assoc ctx :cycle-limit (or cycle-limit ##Inf))
-        ctx'  (assoc ctx :renderer-type :fx, :renderer (ui/init-renderer))]
-   (run ctx')))
 
 
 (comment

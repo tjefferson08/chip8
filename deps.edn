@@ -11,7 +11,7 @@
          :main-opts ["-m" "cognitect.test-runner"]
          :exec-fn cognitect.test-runner.api/test
          :jvm-opts ["-Dcljfx.skip-javafx-initialization=true"]}
-  :main {:main-opts ["-m" "chip8.core"]
+  :main {:main-opts ["-m" "chip8.emu"]
          :jvm-opts ["-Dcljfx.skip-javafx-initialization=true"]}
   :build {:replace-deps {io.github.clojure/tools.build {:git/tag "v0.9.2" :git/sha "fe6b140"}}}
   :ns-default build}}
