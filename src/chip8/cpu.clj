@@ -283,7 +283,7 @@
         ;; ctx'' (fetch/fetch-data ctx')
         ;; ;; _ (println (str "ctx after fetch-data" (:cpu ctx'')))
         pc   (read-reg ctx :pc)
-        _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X SP:%01X[%04X]"
+        _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X dt:%02X st:%02X SP:%01X[%04X]"
                             pc
         ;;                     (get-in ctx'' [:emu :ticks])
                             (get-in ctx' [:cur-instr :type])
@@ -294,6 +294,8 @@
                             (read-reg ctx' :v2)
                             (read-reg ctx' :v3)
                             (read-reg ctx' :v4)
+                            (read-reg ctx' :dt)
+                            (read-reg ctx' :st)
                             (read-reg ctx' :sp)
                             (get (ctx' :stack) (read-reg ctx' :sp))))
                             ;; (r/read-reg ctx'' :a)
