@@ -4,11 +4,13 @@
             [clojure.string :as str]
             ;; [io.github.humbleui.ui :as ui]
             ;; [io.github.humbleui.window :as window]
-            [chip8.ui :as ui]))
+            [chip8.ui :as ui]
+            [clojure.set :as set]))
 
 (def DISPLAY_WIDTH 64)
 (def DISPLAY_HEIGHT 32)
 (def INCREMENT_I_DURING_BULK_LOADS true)
+(def SHIFTING_IGNORES_VY false)
 
 (defn init-display []
   (vec (repeat DISPLAY_HEIGHT (vec (repeat DISPLAY_WIDTH false)))))
@@ -111,10 +113,10 @@
       [_ 0x8 _ _ 3]  {:type :xor, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; XOR Vx, Vy
       [_ 0x8 _ _ 4]  {:type :add, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; ADD Vx, Vy
       [_ 0x8 _ _ 5]  {:type :sub, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; SUB Vx, Vy
-      [_ 0x8 _ _ 6]  {:type :shr, :mode :register, :reg1 (to-vx n2)}                ;;   8xy6 - SHR Vx {, Vy}
+      [_ 0x8 _ _ 6]  {:type :shr, :mode :register, :reg1 (to-vx n2), :reg2 (to-vx n1)}                ;;   8xy6 - SHR Vx {, Vy}
 
       [_ 0x8 _ _ 7]  {:type :subn, :mode :register_register, :reg1 (to-vx n2), :reg2 (to-vx n1)} ;; SUBN Vx, Vy
-      [_ 0x8 _ _ 0xE]  {:type :shl, :mode :register, :reg1 (to-vx n2)}                ;;   8xy6 - SHR Vx {, Vy}
+      [_ 0x8 _ _ 0xE]  {:type :shl, :mode :register, :reg1 (to-vx n2), :reg2 (to-vx n1)}                ;;   8xy6 - SHR Vx {, Vy}
       [_ 0x9 _ _ 0]  {:type :skip, :mode :register_register, :cond :ne, :reg1 (to-vx n2) :reg2 (to-vx n1)} ;;  9xy0 - SNE Vx, Vy
       [_ 0xA _ _ _]  {:type :load, :mode :register_d12, :reg1 :i, :data nnn}        ;; Annn - LD I, addr
       [_ 0xB _ _ _]  {:type :jump, :mode :register_d12, :reg1 :v0, :data nnn}        ;; Bnnn - JP V0, addr
@@ -170,10 +172,14 @@
       (write-reg ctx reg1 i')
       pairs)))
 
+(defn- valid-px? [[x y]]
+  (and (<= 0 x (dec DISPLAY_WIDTH)) (<= 0 y (dec DISPLAY_HEIGHT))))
+
 (defn pixels-for-b [x y b]
-  (->> (map vector (range 7 -1 -1) (iterate #(mod (inc %) DISPLAY_WIDTH) x) (repeat y))
+  (->> (map vector (range 7 -1 -1) (iterate inc x) (repeat y))
        (filter (fn [[bit]] (bit-test b bit)))
-       (map (fn [[_ x y]] [x y]))))
+       (map (fn [[_ x y]] [x y]))
+       (filter valid-px?)))
 
 (defn- draw [ctx]
   (let [{:keys [reg1 reg2 data]} (:cur-instr ctx)
@@ -182,14 +188,22 @@
         sprite-bytes (map #(read-ram ctx %) addrs)
         x            (mod (read-reg ctx reg1) DISPLAY_WIDTH)
         y            (mod (read-reg ctx reg2) DISPLAY_HEIGHT)
-        pixels       (mapcat pixels-for-b
+        all-px       (mapcat pixels-for-b
                              (repeat x)
-                             (iterate #(mod (inc %) DISPLAY_HEIGHT) y)
-                             sprite-bytes)]
-        ;; _          (println "pix" pixels)]
-     (reduce (fn [ctx' [x y]] (update-in ctx' [:display y x] not))
-             ctx
-             pixels)))
+                             (iterate inc y)
+                             sprite-bytes)
+        px-on-screen (for [x (range DISPLAY_WIDTH)
+                           y (range DISPLAY_HEIGHT)
+                           :when (get-in ctx [:display y x])]
+                       [x y])
+        px-to-draw (filter valid-px? all-px)
+        collision?    (not (empty? (set/intersection (set px-on-screen) (set px-to-draw))))
+        ;; _          (println "px-on-screen" px-on-screen)
+        ctx' (reduce (fn [c [x y]] (update-in c [:display y x] not))
+                     ctx
+                     px-to-draw)
+        ctx'' (write-reg ctx' :vf (if collision? 1 0))]
+      ctx''))
 
 (defn- clear-display [ctx]
   (assoc ctx :display (init-display)))
@@ -253,7 +267,9 @@
                                         vf (if (pos? n) 1 0)]
                                     (-> ctx (write-reg reg1 n)
                                             (write-reg :vf vf)))
-      [(:or :shr :shl), _] (let [r (read-reg ctx reg1)
+      [(:or :shr :shl), _] (let [r1 (read-reg ctx reg1)
+                                 r2 (read-reg ctx reg2)
+                                 r  (if SHIFTING_IGNORES_VY r1 r2)
                                  [bit op]  ({:shr [0 bit-shift-right], :shl [7 bit-shift-left]} type)]
                              (-> ctx (write-reg :vf (if (bit-test r bit) 1 0))
                                      (write-reg reg1 (op r 1))))
@@ -294,7 +310,7 @@
         ;; ctx'' (fetch/fetch-data ctx')
         ;; ;; _ (println (str "ctx after fetch-data" (:cpu ctx'')))
         pc   (read-reg ctx :pc)
-        _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X i:%04X dt:%02X st:%02X SP:%01X[%04X]"
+        _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X vf:%02X i:%04X dt:%02X st:%02X SP:%01X[%04X]"
                             pc
         ;;                     (get-in ctx'' [:emu :ticks])
                             (get-in ctx' [:cur-instr :type])
@@ -305,6 +321,7 @@
                             (read-reg ctx' :v2)
                             (read-reg ctx' :v3)
                             (read-reg ctx' :v4)
+                            (read-reg ctx' :vf)
                             (read-reg ctx' :i)
                             (read-reg ctx' :dt)
                             (read-reg ctx' :st)
