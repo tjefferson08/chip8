@@ -172,6 +172,7 @@
                           0x62 0x00
 
                           ;; bulk load registers
+                          0xA5 0x00 ;; LD I, 0x0500
                           0xF2 0x65 ;; LD [I], V0-V1
 
                           0x00 0xFD])]  ;; EXIT

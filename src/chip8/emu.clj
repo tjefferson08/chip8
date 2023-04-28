@@ -2,8 +2,7 @@
   (:require [chip8.bytes :as bytes]
             [clojure.tools.cli :refer [parse-opts]]
             [chip8.cpu :as cpu]
-            [chip8.ui :as ui]
-            [clojure.core.async :as a])
+            [chip8.ui :as ui])
   (:import [java.time Duration Instant]))
 
 (def sprites [0xF0, 0x90, 0x90, 0x90, 0xF0, ;; 0
@@ -73,18 +72,6 @@
    (run ctx')))
 
 (comment
- (a/go-loop [seconds (atom 0)
-             add-seconds! #(swap! seconds + %)]
-         (println "Waiting 1 second")
-         (a/<! (a/timeout 1000))
-         (add-seconds! 1)
-         (println "Waiting 2 seconds")
-         (a/<! (a/timeout 2000))
-         (add-seconds! 2)
-         (println
-          (format "Waited %s seconds"
-                  @seconds)))
-
  (let [now  (Instant/now)
        _    (Thread/sleep 100)
        now' (Instant/now)

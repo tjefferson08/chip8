@@ -8,6 +8,7 @@
 
 (def DISPLAY_WIDTH 64)
 (def DISPLAY_HEIGHT 32)
+(def INCREMENT_I_DURING_BULK_LOADS true)
 
 (defn init-display []
   (vec (repeat DISPLAY_HEIGHT (vec (repeat DISPLAY_WIDTH false)))))
@@ -145,23 +146,29 @@
 
 (defn- load-registers [ctx]
   (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)
-        regs (take (inc data) (registers))
-        pairs (map vector regs (iterate inc (read-reg ctx reg1)))]
+        n     (inc data)
+        regs  (take n (registers))
+        addr  (read-reg ctx reg1)
+        addrs (take n (iterate inc addr))
+        pairs (map vector regs addrs)
+        i'    (if INCREMENT_I_DURING_BULK_LOADS (inc (last addrs)) addr)]
     (reduce
-     (fn [ctx' [r addr]]
-       (write-reg ctx' r (read-ram ctx' addr)))
-     ctx
-     pairs)))
+      (fn [ctx' [r addr]] (write-reg ctx' r (read-ram ctx' addr)))
+      (write-reg ctx reg1 i')
+      pairs)))
 
 (defn- dump-registers [ctx]
   (let [{:keys [type mode reg1 reg2 data]} (:cur-instr ctx)
-        regs (take (inc data) (registers))
-        pairs (map vector regs (iterate inc (read-reg ctx reg1)))]
+        n     (inc data)
+        regs  (take n (registers))
+        addr  (read-reg ctx reg1)
+        addrs (take n (iterate inc addr))
+        pairs (map vector regs addrs)
+        i' (if INCREMENT_I_DURING_BULK_LOADS (inc (last addrs)) addr)]
     (reduce
-     (fn [ctx' [r addr]]
-       (write-ram ctx' addr (read-reg ctx' r)))
-     ctx
-     pairs)))
+      (fn [ctx' [r addr]] (write-ram ctx' addr (read-reg ctx' r)))
+      (write-reg ctx reg1 i')
+      pairs)))
 
 (defn pixels-for-b [x y b]
   (->> (map vector (range 7 -1 -1) (iterate #(mod (inc %) DISPLAY_WIDTH) x) (repeat y))
@@ -173,8 +180,8 @@
         addr (read-reg ctx :i)
         addrs (take data (iterate inc addr))
         sprite-bytes (map #(read-ram ctx %) addrs)
-        x            (read-reg ctx reg1)
-        y            (read-reg ctx reg2)
+        x            (mod (read-reg ctx reg1) DISPLAY_WIDTH)
+        y            (mod (read-reg ctx reg2) DISPLAY_HEIGHT)
         pixels       (mapcat pixels-for-b
                              (repeat x)
                              (iterate #(mod (inc %) DISPLAY_HEIGHT) y)
@@ -251,9 +258,13 @@
                              (-> ctx (write-reg :vf (if (bit-test r bit) 1 0))
                                      (write-reg reg1 (op r 1))))
 
-      [:or, :register_register]  (write-reg ctx reg1 (bit-or (read-reg ctx reg1) (read-reg ctx reg2)))
-      [:and, :register_register]  (write-reg ctx reg1 (bit-and (read-reg ctx reg1) (read-reg ctx reg2)))
-      [:xor, :register_register]  (write-reg ctx reg1 (bit-xor (read-reg ctx reg1) (read-reg ctx reg2)))
+      [(:or :and :xor :or), :register_register]  (let [r1 (read-reg ctx reg1)
+                                                       r2 (read-reg ctx reg2)
+                                                       f  ({:and bit-and, :xor bit-xor, :or bit-or} type)]
+                                                   (-> ctx (write-reg reg1 (f r1 r2))
+                                                           (write-reg :vf 0)))
+      ;; [:and, :register_register]  (write-reg ctx reg1 (bit-and (read-reg ctx reg1) (read-reg ctx reg2)))
+      ;; [:xor, :register_register]  (write-reg ctx reg1 (bit-xor (read-reg ctx reg1) (read-reg ctx reg2)))
       [:skip, :key] (let [r (read-reg ctx reg1)
                           key (ui/->name r)
                           pressed? (@ui/*keys key)]
@@ -283,7 +294,7 @@
         ;; ctx'' (fetch/fetch-data ctx')
         ;; ;; _ (println (str "ctx after fetch-data" (:cpu ctx'')))
         pc   (read-reg ctx :pc)
-        _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X dt:%02X st:%02X SP:%01X[%04X]"
+        _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X i:%04X dt:%02X st:%02X SP:%01X[%04X]"
                             pc
         ;;                     (get-in ctx'' [:emu :ticks])
                             (get-in ctx' [:cur-instr :type])
@@ -294,6 +305,7 @@
                             (read-reg ctx' :v2)
                             (read-reg ctx' :v3)
                             (read-reg ctx' :v4)
+                            (read-reg ctx' :i)
                             (read-reg ctx' :dt)
                             (read-reg ctx' :st)
                             (read-reg ctx' :sp)
@@ -343,7 +355,9 @@
   (into (vector-of :byte) (map unchecked-byte [0xFF]))
   (quot 0xAD 10)
   (rem 0xAD 100)
+  0x500
 
   (count (map #(str %1 " - " %2) (registers) (take 100 (iterate inc 0xF1))))
+  (take 10 (iterate #(mod (inc %) DISPLAY_HEIGHT) 100))
 
   ,)
