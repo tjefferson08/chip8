@@ -2,8 +2,6 @@
   (:require [chip8.bytes :as bytes]
             [clojure.core.match :refer [match]]
             [clojure.string :as str]
-            ;; [io.github.humbleui.ui :as ui]
-            ;; [io.github.humbleui.window :as window]
             [chip8.ui :as ui]
             [clojure.set :as set]))
 
@@ -36,10 +34,11 @@
                 :sp 0xFF
                 :i 0x0000
                 :pc 0x0200}
+     :display-interrupt false,
      :cur-instr nil,
      :cycle-limit ##Inf,
      :cycle-num 0,
-     :waiting false,
+     :waiting? false,
      :ram ram
      :stack (zipmap (range 0 0x10) (repeat 0x0000))
      :display (init-display)
@@ -203,7 +202,7 @@
                      ctx
                      px-to-draw)
         ctx'' (write-reg ctx' :vf (if collision? 1 0))]
-      ctx''))
+      (assoc ctx'' :display-interrupt false)))
 
 (defn- clear-display [ctx]
   (assoc ctx :display (init-display)))
@@ -233,9 +232,11 @@
                               (-> ctx (write-reg :sp sp')
                                       (write-reg :pc pc)))
       [:clear _]             (clear-display ctx)
-      [:draw _]             (let [ctx' (draw ctx)]
-                              (render ctx')
-                              ctx')
+      [:draw _]             (if (:display-interrupt ctx)
+                              (let [ctx' (draw ctx)]
+                                (render ctx')
+                                ctx')
+                              (write-reg ctx :pc (- (read-reg ctx :pc) 2)))
       [:load :register_d8]  (write-reg ctx reg1 data)
       [:load :register_d12] (write-reg ctx reg1 data)
       [:load :register_register] (write-reg ctx reg1 (read-reg ctx reg2))
@@ -310,51 +311,38 @@
         ;; ctx'' (fetch/fetch-data ctx')
         ;; ;; _ (println (str "ctx after fetch-data" (:cpu ctx'')))
         pc   (read-reg ctx :pc)
-        _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X vf:%02X i:%04X dt:%02X st:%02X SP:%01X[%04X]"
-                            pc
-        ;;                     (get-in ctx'' [:emu :ticks])
-                            (get-in ctx' [:cur-instr :type])
-                            (read-ram ctx' pc)
-                            (read-ram ctx' (+ pc 1))
-                            (read-reg ctx' :v0)
-                            (read-reg ctx' :v1)
-                            (read-reg ctx' :v2)
-                            (read-reg ctx' :v3)
-                            (read-reg ctx' :v4)
-                            (read-reg ctx' :vf)
-                            (read-reg ctx' :i)
-                            (read-reg ctx' :dt)
-                            (read-reg ctx' :st)
-                            (read-reg ctx' :sp)
-                            (get (ctx' :stack) (read-reg ctx' :sp))))
-                            ;; (r/read-reg ctx'' :a)
-                            ;; (if (flags/flag-set? ctx'' :z) "Z" "-")
-                            ;; (if (flags/flag-set? ctx'' :n) "N" "-")
-                            ;; (if (flags/flag-set? ctx'' :h) "H" "-")
-                            ;; (if (flags/flag-set? ctx'' :c) "C" "-")
-                            ;; (r/read-reg ctx'' :b)
-                            ;; (r/read-reg ctx'' :c)
-                            ;; (r/read-reg ctx'' :d)
-                            ;; (r/read-reg ctx'' :e)
-                            ;; (r/read-reg ctx'' :h)
-                            ;; (r/read-reg ctx'' :l)
-                            ;; (r/read-reg ctx'' :sp)))
+        ;; _ (println (format "%04X: %-12s (%02X %02X) v0:%02X v1:%02X v2:%02X v3:%02X v4:%02X vf:%02X i:%04X dt:%02X st:%02X SP:%01X[%04X]"
+        ;;                     pc
+        ;; ;;                     (get-in ctx'' [:emu :ticks])
+        ;;                     (get-in ctx' [:cur-instr :type])
+        ;;                     (read-ram ctx' pc)
+        ;;                     (read-ram ctx' (+ pc 1))
+        ;;                     (read-reg ctx' :v0)
+        ;;                     (read-reg ctx' :v1)
+        ;;                     (read-reg ctx' :v2)
+        ;;                     (read-reg ctx' :v3)
+        ;;                     (read-reg ctx' :v4)
+        ;;                     (read-reg ctx' :vf)
+        ;;                     (read-reg ctx' :i)
+        ;;                     (read-reg ctx' :dt)
+        ;;                     (read-reg ctx' :st)
+        ;;                     (read-reg ctx' :sp)
+        ;;                     (get (ctx' :stack) (read-reg ctx' :sp))))
         ;; _ (println (render ctx))
         ctx'' (execute ctx')]
    ctx''))
 
 (defn step [ctx]
-  (let [ctx' (if (:waiting ctx)
+  (let [ctx' (if (:waiting? ctx)
                (step-halted ctx)
                (step-running ctx))]
     (update ctx' :cycle-num inc)))
 
-;; TODO need separate thread and atom-ization for timer decrement @ 60Hz
 (defn run [ctx]
   (loop [ctx' ctx]
     (if (or (> (:cycle-num ctx') (:cycle-limit ctx')) (:stopped ctx'))
       ctx'
-      (recur (step ctx')))))
+      (recur (step (assoc ctx' :display-interrupt true))))))
 
 
 (comment
